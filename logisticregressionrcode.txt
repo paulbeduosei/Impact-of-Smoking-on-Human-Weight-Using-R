@@ -1,0 +1,492 @@
+
+dat <- read.table("Mat524_ProjectData.txt", header = T, sep = " ")
+
+## Select only the useful columns
+dat <- select(dat, -1)
+names(dat)
+str(dat)
+
+### Data Summary ####
+dat$Sex <- ifelse(dat$Gender=="Female", 0, 1)
+dat$Weight_GL <- ifelse(dat$Weight_GL=="Loss", 0, 1)
+dat$l_stage <- ifelse(dat$l_stage=="Adult", 0, 
+                      ifelse(dat$l_stage=="Middle Age Adult",1,2))
+
+levels(as.factor(dat$l_stage))
+
+str(dat)
+corr_matrix <- dat %>% select_if(is.numeric) %>% 
+  cor(method="pearson", use="pairwise.complete.obs") %>% 
+  round(4)
+
+# Extracting the absolute correlation values with 'Smk_St', excluding its own correlation
+corr_values <- abs(corr_matrix["Smk_St", ])
+corr_values <- corr_values[corr_values != 1]  # Remove the correlation of 'survived' with itself
+
+# Sorting the correlation values
+corr_values_sorted <- sort(corr_values)
+
+# Create a horizontal bar plot
+barplot(corr_values_sorted, horiz = TRUE, las = 1, col = "blue",
+        main = "Absolute Correlation with Smoking Status")
+
+library(tidyverse)
+
+library(reshape2)
+corr_values_sorted <- melt(corr_values_sorted) %>%
+  rownames_to_column()
+
+names(corr_values_sorted) <- c("Variable","Value")
+
+## arrange variables in an alphabetical order
+ggplot(corr_values_sorted, 
+  aes(x = Value, y = Variable)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  geom_col() + scale_y_discrete(limits = rev)
+
+## Let us arrange it with respect to the corr values
+library(forcats)
+corr_values_sorted <- corr_values_sorted %>% 
+  mutate(Variables = fct_reorder(Variable, Value, .desc = TRUE))
+
+ggplot(corr_values_sorted, 
+  aes(x = Value, y = Variables)) +
+  geom_col(fill="blue") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_y_discrete(limits = rev) +
+  geom_text(aes(label = Value), vjust = 0.5, hjust = 1.5,
+            size = 3, color = "white") +
+  labs(x = "Correlations Values",
+       y = "",
+       title = "Absolute Correlation with Smoking Status")
+
+#### SUmmary Statistics ####
+sum_stat <- dat %>% select_if(is.numeric) %>% 
+  summary()
+sum_stat
+sd(dat$Weight_GL)
+
+
+#### EDA ####
+
+#### Class created functions ####
+# Generate a pie chart based on the given values and labels
+
+pie_chart <- function(values, labels, title) {
+  # Calculate percentages
+  percentages <- round(values / sum(values) * 100, 1)
+  labels_with_percentages <- paste(labels, ": ", percentages, "%", sep = "")
+  pie(values, labels = labels_with_percentages, main = title)
+}
+
+
+# Generate a count plot based on the given data for a specific variable
+bar_plot1 <- function(name, title, data) {
+  plot_data <- table(data[[name]])
+  barplot(plot_data, main = title)
+}
+
+# Generate a histogram plot for a specific variable
+hist_plot <- function(name, title, data) {
+  hist(data[[name]], main = title, xlab = name, breaks = 18)
+}
+
+# Generate a histogram-based bar plot for continuous variables, grouped by "weight gain"
+bar_plot2 <- function(name, title, data) {
+   # Define colors 
+  colors <- c("blue", "red")
+  
+  # Create density objects for each group
+  density_0 <- density(data[[name]][data$Weight_GL == 0], na.rm = TRUE)
+  density_1 <- density(data[[name]][data$Weight_GL == 1], na.rm = TRUE)
+  
+  # Find common range and create breaks
+  common_range <- range(c(density_0$x, density_1$x), na.rm = TRUE)
+  breaks <- seq(from = common_range[1], to = common_range[2], length.out = 30)
+  
+  # Calculate counts for histograms
+  hist_0 <- hist(data[[name]][data$Weight_GL == 0], breaks = breaks, plot = FALSE)
+  hist_1 <- hist(data[[name]][data$Weight_GL == 1], breaks = breaks, plot = FALSE)
+  
+  # Calculate the midpoints for barplot
+  midpoints <- (breaks[-length(breaks)] + breaks[-1]) / 2
+  
+  # Calculate the bar heights and width
+  bar_width <- min(diff(midpoints)) / 2
+  
+  # Set up plot
+  plot(1, type = "n", xlim = c(common_range[1], common_range[2]), ylim = c(0, max(c(hist_0$counts, hist_1$counts))),
+       xlab = name, ylab = "Count", main = title)
+  
+  # Draw bars for each group
+  for (i in seq_along(midpoints)) {
+    rect(midpoints[i] - bar_width, 0, midpoints[i], hist_0$counts[i], col = colors[1], border = NA)
+    rect(midpoints[i], 0, midpoints[i] + bar_width, hist_1$counts[i], col = colors[2], border = NA)
+  }
+  
+  # Add legend
+  legend("topright", legend = c("Weight Loss", "Weight Gain"), fill = colors)
+}
+
+
+# Plot a bar chart for discrete variables, grouped by "survived"
+bar_plot3 <- function(name, title, data) {
+  
+  # Create a contingency table
+  counts <- table(data[[name]], data$Weight_GL)
+  
+  # Number of categories and bars
+  num_categories <- nrow(counts)
+  num_gained_levels <- ncol(counts)
+  
+  # Set up plot
+  plot(1, type = "n", xlim = c(0, num_categories + 1), ylim = c(0, max(counts)),
+       xlab = name, ylab = "Count", main = title, xaxt = "n")
+  
+  # Colors
+  colors <- c("blue", "red")
+  
+  # Plotting bars
+  for (cat_level in 1:num_categories) {
+    for (weight_level in 1:num_gained_levels) {
+      bar_pos <- cat_level + (weight_level - 1.5) * 0.4
+      rect(bar_pos - 0.2, 0, bar_pos + 0.2, counts[cat_level, weight_level], 
+           col = colors[weight_level], border = "black")
+    }
+  }
+  
+  # Add category labels
+  axis(1, at = 1:num_categories, labels = rownames(counts))
+  
+  # Add legend
+  legend("topright", legend = c("Weight Loss", "Weight Gain"), fill = colors, bty = "n")
+}
+
+
+
+
+# Plot a histogram for continuous variables, grouped by "survived"
+hist_plot2 <- function(name, title, data) {
+  # Define colors with transparency (alpha)
+  colors <- c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)) # Blue and Red
+  
+  # Calculate the breaks for the histogram
+  combined_range <- range(data[[name]], na.rm = TRUE)
+  breaks <- seq(from = combined_range[1], to = combined_range[2], length.out = 30)
+  
+  # Histogram for 'Loss weight'
+  hist_loss_weight <- hist(data[[name]][data$Weight_GL == 0], breaks = breaks, plot = FALSE)
+  
+  # Histogram for 'Gained weight'
+  hist_gained_weight <- hist(data[[name]][data$Weight_GL == 1], breaks = breaks, plot = FALSE)
+  
+  # Plot setup
+  plot(hist_loss_weight, col = colors[1], xlim = combined_range, ylim = c(0, max(c(hist_loss_weight$counts, hist_gained_weight$counts))), 
+       main = title, xlab = name, ylab = "Count")
+  
+  # Add the second histogram
+  plot(hist_gained_weight, col = colors[2], add = TRUE)
+  
+  # Add legend
+  legend("topright", legend = c("Loss weight", "Gained weight"), fill = colors, bty = "n")
+}
+
+
+# Plot a boxplot for continuous variables, grouped by "survived"
+box_plot <- function(name, title, data) {
+  boxplot(data[[name]] ~ data$Weight_GL, main = title, ylab = name)
+}
+
+
+library(ggplot2)
+library(ggrepel)
+
+#### Pie Chart ####
+pie_chart <- function(values, labels, title) {
+  percentages <- round(values / sum(values) * 100, 1)
+  labels_with_percentages <- paste(labels, ": ", percentages, "%", sep = "")
+  pie(values, labels = labels_with_percentages, main = title)
+}
+
+df <- table(dat$Smk_St)
+pie_chart(df, c("Non-Smokers","Smokers"), "A. Distributon of Smoking Status")
+
+df1 <- table(dat$Sex)
+pie_chart(df1, c("Female","Male"), "B. Distribution of Sex")
+
+par(mfrow=c(1,2))
+
+#### Bar Chart ####
+ggplot(dat, aes(x = l_stage, fill = Gender)) +
+  geom_bar() +
+  scale_fill_brewer(palette = "Set1")
+
+## Exercise Habit by Gender
+ggplot(dat, aes(x = Ex_Hbt, fill = Gender)) +
+  geom_bar() +
+  scale_fill_brewer(palette = "Set1")
+
+## Smoking Status by Gender
+ggplot(dat, aes(x = Smk_St, fill = Gender)) +
+  geom_bar() +
+  scale_fill_brewer(palette = "Set1")
+
+dat$Smk_St <- as.factor(dat$Smk_St)
+## Smoking Status by Gender
+ggplot(dat, aes(x = Weight_GL, fill = Smk_St)) +
+  geom_bar() +
+  scale_color_manual(labels = c("Non-Smokers", "Smokers"), 
+          values = c("Non-Smokers"="#00ba38", "Smokers"="#f8766d"))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(x = "Weight Gained or Loss")
+
+str(dat)
+names(dat)
+
+cat_columns <- c("Sex", "Ex_Hbt", "Diet_Type")
+
+for (name in cat_columns) {
+  # Count the number of instances for each unique value in the categorical variable
+  val <- sort(table(dat[[name]]), decreasing = TRUE)
+  val <- head(val, 5)  # Limit to the first 5 unique values
+  names <- names(val)
+  
+  
+  # Bar plot for outcome distribution
+  bar_plot3(name, paste("Outcome Distribution by", name), dat)
+}
+
+#### Histogram ####
+ggplot(dat, aes(Age)) +
+  geom_histogram(color = "#000000", fill = "#0099F8", bins = 22)+
+  labs(x = "Age",
+       y = "Frequency",
+       title = "Hisotgram of Age")+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+
+ggplot(dat, aes(Bld_Pre)) +
+  geom_histogram(color = "#000000", fill = "#0099F8", bins = 22)+
+  labs(x = "Age",
+       y = "Frequency",
+       title = "Hisotgram of Age")+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+ggplot(dat, aes(i_Weight)) +
+  geom_histogram(color = "#000000", fill = "#0099F8", bins = 22)+
+  labs(x = "Age",
+       y = "Frequency",
+       title = "Hisotgram of Age")+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+ggplot(dat, aes(f_Weight)) +
+  geom_histogram(color = "#000000", fill = "#0099F8", bins = 22)+
+  labs(x = "Age",
+       y = "Frequency",
+       title = "Hisotgram of Age")+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+
+nrow(dat[dat$Weight_GL==1,])
+weight_Gain <- dat[dat$Weight_GL==1,]
+weight_Loss <- dat[dat$Weight_GL==0,]
+dim(weight_Loss)
+dim(weight_Gain)
+
+nrow(weight_Gain <- dat[dat$Weight_GL==1,])
+nrow(weight_Gain[weight_Gain$Smk_St==1,])
+723-369
+(369/723)*100
+
+
+nrow(weight_Loss <- dat[dat$Weight_GL==0,])
+nrow(weight_Loss[weight_Loss$Smk_St==1,])
+(134/277)*100
+
+names(dat)
+
+
+
+#### Assumptions check #####
+## Variables we are using in the model
+## weight_GL, Bld_Pre, Ex_Hbt, Diet_Type, Age, Smk_St and Sex.
+
+cor.test(dat$Bld_Pre,dat$Age, method = "pearson")
+cor.test(dat$Bld_Pre,dat$Ex_Hbt, method = "spearman")
+cor.test(dat$Bld_Pre,dat$Diet_Type, method = "spearman")
+cor.test(dat$Bld_Pre,dat$Smk_St, method = "spearman")
+cor.test(dat$Bld_Pre,dat$Sex, method = "spearman")
+
+## selected data for analysis
+dat <- dat[, c(5,6,7,8,9,11,12)]
+names(dat)
+levels(as.factor(dat$Diet_Type))
+
+
+
+#### Fit Logistic Regression ####
+dat$Ex_Hbt <- factor(dat$Ex_Hbt, levels = c("3", "1", "2"))
+dat$Sex <- factor(dat$Sex, levels = c("1", "0"))
+dat$Diet_Type <- factor(dat$Diet_Type, levels = c("3", "1", "2"))
+dat$Smk_St <- factor(dat$Smk_St, levels = c("1", "0"))
+
+lrm <- glm(Weight_GL ~ Sex + Age + Bld_Pre + 
+             Ex_Hbt + Diet_Type + Smk_St, 
+             data = dat, 
+             family = binomial(link = "logit"))
+summary(lrm)
+library(car)
+vif(lrm)
+
+#### Compared Probabilities ####
+#### Compare the tendency to gain or loss weight between male and female. grouped_sex an weight gain
+grouped_SWG <- table(dat$Sex, dat$Weight_GL)
+print(grouped_SWG)
+
+# Calculating weight gained or loss probabilities
+M_weightGL_prob <- grouped_SWG["1", "1"] / sum(grouped_SWG["1", ])
+F_weightGL_prob <- grouped_SWG["0", "1"] / sum(grouped_SWG["0", ])
+print(paste("Potential prob for male is", M_weightGL_prob, ", for female is", F_weightGL_prob))
+
+
+# Calculating odds of weight gained or loss
+male_odds <- grouped_SWG["1", "1"] / grouped_SWG["1", "0"]
+female_odds <- grouped_SWG["0", "1"] / grouped_SWG["0", "0"]
+print(paste("Odds of survival for male is", male_odds, ", for female is", female_odds))
+
+# Calculating odds ratio
+odds_ratio <- male_odds / female_odds
+print(paste("Odds ratio between male and female is", odds_ratio))
+
+
+#### Compare the tendency to gain or loss weight between smokers and non-smokers. grouped_sex an weight gain
+grouped_SWG <- table(dat$Smk_St, dat$Weight_GL)
+print(grouped_SWG)
+
+# Calculating weight gained or loss probabilities
+S_weightGL_prob <- grouped_SWG["1", "1"] / sum(grouped_SWG["1", ])
+NS_weightGL_prob <- grouped_SWG["0", "1"] / sum(grouped_SWG["0", ])
+print(paste("Potential prob for smokers is", S_weightGL_prob, ", for non-smokers is", NS_weightGL_prob))
+
+
+# Calculating odds of weight gained or loss
+smokers_odds <- grouped_SWG["1", "1"] / grouped_SWG["1", "0"]
+nonsmokers_odds <- grouped_SWG["0", "1"] / grouped_SWG["0", "0"]
+print(paste("Odds of survival for smokers is", smokers_odds, ", for non-smokers is", nonsmokers_odds))
+
+# Calculating odds ratio
+odds_ratio <- smokers_odds / nonsmokers_odds
+print(paste("Odds ratio between male and female is", odds_ratio))
+
+
+#### Logistic Regression ####
+dat$Ex_Hbt <- factor(dat$Ex_Hbt, levels = c("3", "1", "2"))
+dat$Sex <- factor(dat$Sex, levels = c("1", "0"))
+dat$Diet_Type <- factor(dat$Diet_Type, levels = c("3", "1", "2"))
+dat$Smk_St <- factor(dat$Smk_St, levels = c("1", "0"))
+
+## blood pressure has no significant contribution to the model
+## So, it is removed from the model
+
+lrm <- glm(Weight_GL ~ Sex + Age + 
+             Ex_Hbt + Diet_Type + Smk_St, 
+           data = dat, 
+           family = binomial(link = "logit"))
+summary(lrm)
+
+# coefficients are interpreted as log-odds-ratio
+model_coefs <- lrm$coefficients
+
+# Print the coefficients
+print(model_coefs)
+conf_int <- confint(lrm)
+print(conf_int)
+
+odds_ratios <- exp(cbind(OR = coef(lrm), conf_int))
+
+# Print the odds ratios and confidence intervals for odds ratio
+print(odds_ratios)
+
+
+#### Diagnostic Residual ####
+predicted_probs <- predict(lrm, type = "response")
+# must set type = "response", which gives the predicted probabilities. 
+
+residuals <- residuals(lrm, type = "deviance")
+
+plot(predicted_probs, residuals, xlab = "Predicted Probabilities", ylab = "Deviance Residuals",
+     main = "Residuals vs. Predicted Probabilities")
+lines(lowess(predicted_probs, residuals, f=0.95), col = "red")
+
+lrm$deviance
+
+par(mfrow =c(1,1))
+
+#### Goodness of fit ####
+## Hosmer Lemeshow test
+# extract the x data and y separately,
+names(dat)
+x_train <- dat[c("Ex_Hbt", "Sex", "Age", "Diet_Type", "Smk_St")]
+y_train <- dat$Weight_GL
+
+library(ResourceSelection)
+
+# actual outcomes are in 'y_train'
+hosmer_lemeshow_test <- hoslem.test(y_train, fitted(lrm), g = 5)
+
+# Print the test results
+print(hosmer_lemeshow_test)
+
+#### Leverage and cook's distance ####
+
+# Calculate leverage values
+leverage_values <- hatvalues(lrm)
+
+# Calculate Cook's distance
+cooks_dist <- cooks.distance(lrm)
+
+# Plot leverage values
+plot(leverage_values, type = "h", main = "Leverage Values", xlab = "Case Index", ylab = "Leverage")
+# Identify and highlight the top 3 leverage values
+top_3_leverage <- order(leverage_values, decreasing = TRUE)[1:3]
+points(top_3_leverage, leverage_values[top_3_leverage], col = "red", pch = 19)
+# Label the top 3 points
+text(top_3_leverage, leverage_values[top_3_leverage], labels = top_3_leverage, col = "red", pos = 2)
+
+
+#### Cooks distance ####
+# Plot Cook's distance
+plot(cooks_dist, type = "h", main = "Cook's Distance", xlab = "Case Index", ylab = "Cook's Distance")
+# Identify and highlight the top 3 Cook's distance values
+top_3_cooks <- order(cooks_dist, decreasing = TRUE)[1:3]
+points(top_3_cooks, cooks_dist[top_3_cooks], col = "blue", pch = 19)
+# Label the top 3 points
+text(top_3_cooks, cooks_dist[top_3_cooks], labels = top_3_cooks, col = "blue", pos = 2)
+
+
+#### In sample prediction ####
+ytrain_pred_prob <- predict(lrm, newdata = x_train, type = "response")
+# must set type = "response" which gives the predicted probabilities. 
+
+# using 0.5 as threshhold
+y_train_pred <- ifelse(ytrain_pred_prob > 0.5, 1, 0) 
+
+# The in-sample accuracy is calculated by comparing predicted classes 
+# with actual classes and taking the mean.
+in_sample_accuracy <- mean(y_train_pred == y_train)
+print(in_sample_accuracy)
+
+## Confusion matrix
+library(e1071)
+
+confusion_matrix <- table(y_train, y_train_pred)
+print(confusion_matrix)
+
+library(pROC)
+roc_curve <- roc(response = y_train, predictor = ytrain_pred_prob)
+roc_curve
+plot(roc_curve, main = "ROC Curve", col = "#1c61b6", lwd = 2)
